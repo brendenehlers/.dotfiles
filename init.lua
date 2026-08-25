@@ -207,7 +207,23 @@ require('lazy').setup({
             m('<leader>gu', gs.undo_stage_hunk, 'undo stage hunk')
             m('<leader>gp', gs.preview_hunk, 'preview hunk')
             m('<leader>gb', gs.toggle_current_line_blame, 'toggle line blame')
-            m('<leader>gd', gs.diffthis, 'diff this')
+            m('<leader>gd', function()
+              if vim.wo.diff then
+                -- close the revision split(s) gitsigns opened, then clear the
+                -- lingering 'diff' state from every window in this tab
+                for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+                  if vim.api.nvim_win_is_valid(w) then
+                    local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))
+                    if name:match('^gitsigns://') then
+                      pcall(vim.api.nvim_win_close, w, true)
+                    end
+                  end
+                end
+                vim.cmd('diffoff!')
+              else
+                gs.diffthis()
+              end
+            end, 'toggle diff against index')
           end,
         },
       },
@@ -301,18 +317,4 @@ vim.api.nvim_create_autocmd('LspAttach', {
     -- not <leader>f: that prefix belongs to telescope
     m('<leader>cf', function() vim.lsp.buf.format({ async = true }) end, 'format buffer')
   end,
-})
-
-vim.diagnostic.config({
-  virtual_text = true,
-  severity_sort = true,
-  float = { border = 'rounded', source = true },
-  signs = {
-    text = {
-      [vim.diagnostic.severity.ERROR] = 'E',
-      [vim.diagnostic.severity.WARN] = 'W',
-      [vim.diagnostic.severity.INFO] = 'I',
-      [vim.diagnostic.severity.HINT] = 'H',
-    },
-  },
 })
