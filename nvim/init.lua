@@ -239,7 +239,23 @@ require('lazy').setup({
       -- treesitter
       {
         'nvim-treesitter/nvim-treesitter',
+        branch = 'main',
         build = ':TSUpdate',
+        lazy = false,
+        config = function()
+          require('nvim-treesitter').install({
+            'bash', 'css', 'go', 'gomod', 'gosum', 'html', 'javascript',
+            'json', 'lua', 'markdown', 'markdown_inline', 'python', 'rust',
+            'toml', 'tsx', 'typescript', 'vim', 'vimdoc', 'yaml',
+          })
+          -- The main branch does not start highlighting on its own.
+          vim.api.nvim_create_autocmd('FileType', {
+            desc = 'Start treesitter highlighting when a parser exists',
+            callback = function(ev)
+              pcall(vim.treesitter.start, ev.buf)
+            end,
+          })
+        end,
       },
     },
     install = { colorscheme = { "tokyonight" } },

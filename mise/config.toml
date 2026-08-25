@@ -13,3 +13,6 @@ neovim = "0.12.5"
 ripgrep = "15.2.0"
 fd = "10.4.2"
 tmux = "3.7c"
+# nvim-treesitter on the main branch shells out to this CLI to build parsers.
+# 0.26 and later need glibc 2.39, which Ubuntu 22.04 does not have.
+tree-sitter = "0.25.10"
