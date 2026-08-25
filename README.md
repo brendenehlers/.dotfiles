@@ -53,10 +53,13 @@ Installed automatically via the system package manager (`apt`, `dnf`, `pacman`,
 Two things are handled specially:
 
 - **neovim** is installed from the official GitHub release tarball into
-  `~/.local`, *not* from the distro package — Ubuntu 24.04 still ships 0.9.5
-  and this config needs 0.11+. An existing new-enough `nvim` is left alone.
-- **`fd`** installs as `fdfind` on Debian/Ubuntu. The script symlinks
-  `~/.local/bin/fd` to it so tooling that expects the real name works.
+  `~/.local/share/neovim`, with a symlink at `~/.local/bin/nvim` — *not* from
+  the distro package, since Ubuntu 24.04 still ships 0.9.5 and this config
+  needs 0.11+. An existing new-enough `nvim` is left alone.
+- **renamed binaries.** Debian/Ubuntu ship `fd` as `fdfind`. A dep tagged
+  `shim` in the `DEPS` table gets a symlink in `~/.local/bin` under its
+  canonical name, so tooling that hardcodes `fd` works. (`bat`/`batcat` is the
+  same story when it comes up — tag it and it's handled.)
 
 Not automated: a **Nerd Font** for `nvim-web-devicons` icons. Fonts are
 selected by the terminal emulator, which on WSL lives on the Windows side.
