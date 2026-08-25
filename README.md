@@ -25,6 +25,8 @@ and mason installs the LSP servers.
 | ---------------- | ---------------- |
 | `nvim`           | `~/.config/nvim` |
 | `tmux/tmux.conf` | `~/.tmux.conf`   |
+| `zsh/zshrc`      | `~/.zshrc`       |
+| `zsh/p10k.zsh`   | `~/.p10k.zsh`    |
 
 ## adding a new config
 
@@ -52,6 +54,7 @@ Installed automatically via the system package manager (`apt`, `dnf`, `pacman`,
 | `fd`      | telescope find-files |
 | a C compiler | treesitter parsers |
 | `tmux`    | `tmux/tmux.conf`     |
+| `zsh`     | `zsh/zshrc`          |
 
 Two things are handled specially:
 
@@ -64,5 +67,43 @@ Two things are handled specially:
   canonical name, so tooling that hardcodes `fd` works. (`bat`/`batcat` is the
   same story when it comes up — tag it and it's handled.)
 
+`install.sh` also clones the three repos `zsh/zshrc` needs — oh-my-zsh,
+powerlevel10k, and zsh-syntax-highlighting — into `$HOME`. They need no root
+and no version pinning, so cloning them beats leaving you with a broken prompt.
+
 Not automated: a **Nerd Font** for `nvim-web-devicons` icons. Fonts are
 selected by the terminal emulator, which on WSL lives on the Windows side.
+
+## zsh
+
+`zsh/zshrc` is one file. Split it only once it gets long enough to scroll or
+slow enough to bisect.
+
+Two files it sources stay out of git, because they hold values that differ per
+machine. `install.sh` creates both, empty, and never overwrites one that
+already exists:
+
+| file            | holds                     | mode  |
+| --------------- | ------------------------- | ----- |
+| `~/.secrets`    | API keys and tokens       | `600` |
+| `~/.zshrc.local` | per-machine overrides    | `644` |
+
+Use `~/.zshrc.local` for anything a repo setup script wants to append to your
+shell rc. `~/.zshrc` is a symlink into this repo, so an append there would edit
+a tracked file.
+
+### tools that may not be installed
+
+`install.sh` installs no language runtime. Instead each tool block in
+`zsh/zshrc` checks for the file it needs and does nothing when that file is
+absent:
+
+| tool  | gate                              |
+| ----- | --------------------------------- |
+| rust  | `~/.cargo/env`                    |
+| nvm   | `$NVM_DIR/nvm.sh`                 |
+| mise  | `~/.local/bin/mise`               |
+| go    | `/usr/local/go/bin` on `$PATH`    |
+
+The shell starts clean on a bare machine, and picks a tool up on its own the
+day you install it. Add a new tool the same way: one gate, no installer.

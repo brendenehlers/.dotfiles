@@ -24,6 +24,24 @@ PATH="$LOCAL_BIN:$PATH"
 LINKS=(
   "nvim:$CONFIG_HOME/nvim"
   "tmux/tmux.conf:$HOME/.tmux.conf"
+  "zsh/zshrc:$HOME/.zshrc"
+  "zsh/p10k.zsh:$HOME/.p10k.zsh"
+)
+
+# url : destination (absolute). zshrc sources each of these behind a file
+# check, but the prompt is unusable without them, so clone them rather than
+# let the check hide a broken setup.
+ZSH_REPOS=(
+  "https://github.com/ohmyzsh/ohmyzsh.git:$HOME/.oh-my-zsh"
+  "https://github.com/romkatv/powerlevel10k.git:$HOME/.oh-my-zsh/custom/themes/powerlevel10k"
+  "https://github.com/zsh-users/zsh-syntax-highlighting.git:$HOME/.zsh-plugins/zsh-syntax-highlighting"
+)
+
+# path : mode. zshrc sources these; they hold machine-local values and never
+# enter git.
+TOUCH_FILES=(
+  "$HOME/.secrets:600"
+  "$HOME/.zshrc.local:644"
 )
 
 # generic name : binaries that satisfy it (first is the canonical name) : flags
@@ -37,6 +55,7 @@ DEPS=(
   "fd:fd fdfind:shim"
   "cc:cc gcc clang"
   "tmux:tmux"
+  "zsh:zsh"
 )
 
 CHECK_ONLY=0
@@ -216,6 +235,38 @@ install_neovim() {
   info "installed: $($LOCAL_BIN/nvim --version | head -1)"
 }
 
+# --------------------------------------------------------------------- zsh ---
+
+clone_repo() {
+  local url="$1" dest="$2"
+
+  if [[ -d "$dest/.git" ]]; then
+    info "ok: $dest"
+    return
+  fi
+
+  if [[ -e "$dest" ]]; then
+    warn "backing up $dest -> $dest.bak.$STAMP"
+    mv "$dest" "$dest.bak.$STAMP"
+  fi
+
+  info "cloning $url -> $dest"
+  mkdir -p "$(dirname "$dest")"
+  git clone --depth 1 "$url" "$dest"
+}
+
+# Create an empty file the shell can source. Never overwrite one that exists:
+# it holds the user's own secrets.
+touch_file() {
+  local path="$1" mode="$2"
+
+  if [[ ! -e "$path" ]]; then
+    info "creating: $path"
+    : > "$path"
+  fi
+  chmod "$mode" "$path"
+}
+
 # ------------------------------------------------------------------- links ---
 
 link() {
@@ -280,6 +331,13 @@ main() {
   shim_deps
 
   local entry
+  for entry in "${ZSH_REPOS[@]}"; do
+    clone_repo "${entry%:*}" "${entry##*:}"
+  done
+  for entry in "${TOUCH_FILES[@]}"; do
+    touch_file "${entry%:*}" "${entry##*:}"
+  done
+
   for entry in "${LINKS[@]}"; do
     link "${entry%%:*}" "${entry#*:}"
   done
