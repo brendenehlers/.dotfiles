@@ -1,0 +1,15 @@
+# Tools that are not part of the base system. install.sh links this file to
+# $XDG_CONFIG_HOME/mise/config.toml and then runs `mise install`.
+#
+# Versions are pinned so every machine gets the same build. Bump one with
+# `mise use -g <tool>@<version>`, which edits this file in place.
+#
+# Only bootstrap and system-integrated packages stay with the package manager:
+# git, curl, unzip, a C compiler, and zsh.
+
+[tools]
+# nvim-lspconfig and mason 2.x require 0.11 or newer
+neovim = "0.12.5"
+ripgrep = "15.2.0"
+fd = "10.4.2"
+tmux = "3.7c"

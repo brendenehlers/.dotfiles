@@ -6,22 +6,27 @@ CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 LOCAL_BIN="$HOME/.local/bin"
 STAMP="$(date +%Y%m%d%H%M%S)"
 
-# nvim-lspconfig and mason 2.x require 0.11+
-NVIM_MIN_MAJOR=0
-NVIM_MIN_MINOR=11
+MISE_BIN="$LOCAL_BIN/mise"
+MISE_SHIMS="$HOME/.local/share/mise/shims"
 
-# Anything we install lands in $LOCAL_BIN, which a fresh machine may not have
-# on PATH yet. Without this, re-runs would not see our own work and would
-# reinstall from scratch every time. Remember whether the user's own PATH
-# had it, since prepending here would mask that.
+# Anything we install lands in $MISE_SHIMS or $LOCAL_BIN, which a fresh machine
+# may not have on PATH yet. Without this, re-runs would not see our own work and
+# would reinstall from scratch every time. Remember whether the user's own PATH
+# had them, since prepending here would mask that.
 case ":$PATH:" in
   *":$LOCAL_BIN:"*) LOCAL_BIN_ON_PATH=1 ;;
   *)                LOCAL_BIN_ON_PATH=0 ;;
 esac
-PATH="$LOCAL_BIN:$PATH"
+case ":$PATH:" in
+  *":$MISE_SHIMS:"*) MISE_SHIMS_ON_PATH=1 ;;
+  *)                 MISE_SHIMS_ON_PATH=0 ;;
+esac
+# Shims first: mise owns these tools, and a distro copy must not win.
+PATH="$MISE_SHIMS:$LOCAL_BIN:$PATH"
 
 # source (relative to $DOTFILES) -> destination (absolute)
 LINKS=(
+  "mise/config.toml:$CONFIG_HOME/mise/config.toml"
   "nvim:$CONFIG_HOME/nvim"
   "tmux/tmux.conf:$HOME/.tmux.conf"
   "zsh/zshrc:$HOME/.zshrc"
@@ -44,30 +49,47 @@ TOUCH_FILES=(
   "$HOME/.zshrc.local:644"
 )
 
-# generic name : binaries that satisfy it (first is the canonical name) : flags
-# flag `shim` -> if only a non-canonical binary is present, symlink the
-# canonical name to it (Debian ships fd as `fdfind`, bat as `batcat`, ...)
+# Packages the system owns. These bootstrap mise, build native code, or must be
+# registered with the system to work at all — a login shell needs an entry in
+# /etc/shells. Everything else belongs to mise; see MISE_TOOLS.
+#
+# generic name : binaries that satisfy it (first is the canonical name) : unused
+#              : probe flag that confirms the binary runs (default --version)
 DEPS=(
   "git:git"
   "curl:curl"
-  "unzip:unzip"
-  "ripgrep:rg"
-  "fd:fd fdfind:shim"
+  "unzip:unzip::-v"
   "cc:cc gcc clang"
-  "tmux:tmux"
   "zsh:zsh"
 )
 
+# Tools mise installs. The versions live in mise/config.toml, which LINKS puts
+# at $CONFIG_HOME/mise/config.toml before `mise install` reads it.
+#
+# tool name as mise knows it : binary it provides : probe flag (default --version)
+MISE_TOOLS=(
+  "neovim:nvim"
+  "ripgrep:rg"
+  "fd:fd"
+  "tmux:tmux:-V"
+)
+
 CHECK_ONLY=0
-MISSING_DEPS=()   # specs from DEPS that are not satisfied
-NVIM_NEEDED=0
+MISSING_DEPS=()    # specs from DEPS that are not satisfied
+MISSING_TOOLS=()   # specs from MISE_TOOLS that are not satisfied
+MISE_NEEDED=0
 
 info() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m !!\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m !!\033[0m %s\n' "$*" >&2; exit 1; }
 
 have()     { command -v "$1" >/dev/null 2>&1; }
-have_any() { local b; for b in $1; do have "$b" && return 0; done; return 1; }
+
+# A name on PATH is not proof of a usable binary. A version manager can leave a
+# shim that resolves but exits non-zero, and every caller then sees the dep as
+# installed. Run the binary to settle it.
+works()    { have "$1" && "$1" "${2:---version}" >/dev/null 2>&1; }
+works_any() { local b; for b in $1; do works "$b" "$2" && return 0; done; return 1; }
 
 usage() {
   cat <<EOF
@@ -92,13 +114,12 @@ detect_pkg_mgr() {
 # Empty output means "not packaged here" — see pkg_hint for what to tell the user.
 pkg_name() {
   case "$1:$PKG_MGR" in
-    fd:apt-get|fd:dnf) echo fd-find ;;   # binary installs as `fdfind`
     cc:apt-get)        echo build-essential ;;
     cc:dnf|cc:zypper)  echo "gcc make" ;;
     cc:pacman)         echo base-devel ;;
     cc:apk)            echo build-base ;;
     cc:brew)           echo "" ;;
-    *)                 echo "$1" ;;      # git, curl, unzip, ripgrep, fd
+    *)                 echo "$1" ;;      # git, curl, unzip, zsh
   esac
 }
 
@@ -124,24 +145,27 @@ pkg_install() {
 }
 
 scan_deps() {
-  local spec generic bins
+  local spec generic bins probe b
   MISSING_DEPS=()
   for spec in "${DEPS[@]}"; do
-    IFS=: read -r generic bins _ <<<"$spec"
-    if have_any "$bins"; then
+    IFS=: read -r generic bins _ probe <<<"$spec"
+    if works_any "$bins" "$probe"; then
       info "found: $generic"
-    else
-      warn "missing: $generic"
-      MISSING_DEPS+=("$spec")
+      continue
     fi
+    for b in $bins; do
+      have "$b" && warn "$(command -v "$b") is on PATH but does not run"
+    done
+    warn "missing: $generic"
+    MISSING_DEPS+=("$spec")
   done
 }
 
 install_deps() {
-  local spec generic bins pkgs=() p hint
+  local spec generic bins probe b pkgs=() p hint
 
   for spec in "${MISSING_DEPS[@]}"; do
-    IFS=: read -r generic bins _ <<<"$spec"
+    IFS=: read -r generic bins _ probe <<<"$spec"
     p="$(pkg_name "$generic")"
     if [[ -n "$p" ]]; then
       pkgs+=($p)   # unquoted on purpose: "gcc make" is two packages
@@ -157,82 +181,105 @@ install_deps() {
 
   # verify rather than trust the package manager's exit code
   for spec in "${MISSING_DEPS[@]}"; do
-    IFS=: read -r generic bins _ <<<"$spec"
-    have_any "$bins" || warn "still missing after install: $generic"
-  done
-}
-
-# Give a dep its canonical name when the distro installed it under another
-# one, so tooling that hardcodes the usual name still works.
-shim_deps() {
-  local spec generic bins flags canonical b target
-  for spec in "${DEPS[@]}"; do
-    IFS=: read -r generic bins flags <<<"$spec"
-    [[ "$flags" == shim ]] || continue
-    canonical="${bins%% *}"
-    have "$canonical" && continue
+    IFS=: read -r generic bins _ probe <<<"$spec"
+    works_any "$bins" "$probe" && continue
+    warn "still missing after install: $generic"
     for b in $bins; do
-      if have "$b"; then
-        target="$(command -v "$b")"
-        mkdir -p "$LOCAL_BIN"
-        ln -sf "$target" "$LOCAL_BIN/$canonical"
-        info "shimmed: $LOCAL_BIN/$canonical -> $target"
-        break
-      fi
+      have "$b" && warn "  $(command -v "$b") shadows it; remove it or point it at a real $b"
     done
   done
 }
 
-# ------------------------------------------------------------------ neovim ---
+# -------------------------------------------------------------------- mise ---
 
-scan_neovim() {
-  local banner major minor
-  NVIM_NEEDED=0
+scan_mise() {
+  local spec tool bin probe
+  MISSING_TOOLS=()
+  MISE_NEEDED=0
 
-  if ! have nvim; then
-    warn "missing: neovim"
-    NVIM_NEEDED=1
-    return
-  fi
-
-  banner="$(nvim --version | head -1)"
-  major="$(printf '%s' "$banner" | sed -nE 's/^NVIM v([0-9]+)\..*/\1/p')"
-  minor="$(printf '%s' "$banner" | sed -nE 's/^NVIM v[0-9]+\.([0-9]+).*/\1/p')"
-
-  if [[ -z "$major" || -z "$minor" ]]; then
-    warn "could not read a version from: $banner — leaving it alone"
-    return
-  fi
-
-  if (( major > NVIM_MIN_MAJOR || (major == NVIM_MIN_MAJOR && minor >= NVIM_MIN_MINOR) )); then
-    info "found: $banner"
+  if works "$MISE_BIN"; then
+    info "found: $($MISE_BIN --version)"
   else
-    warn "$banner is older than the required $NVIM_MIN_MAJOR.$NVIM_MIN_MINOR"
-    NVIM_NEEDED=1
+    warn "missing: mise"
+    MISE_NEEDED=1
   fi
+
+  # Nothing can be probed through a mise that is not there yet.
+  if (( MISE_NEEDED )); then
+    MISSING_TOOLS=("${MISE_TOOLS[@]}")
+    return
+  fi
+
+  for spec in "${MISE_TOOLS[@]}"; do
+    IFS=: read -r tool bin probe <<<"$spec"
+    # `mise which` fails unless mise itself provides the binary, so a distro
+    # copy still on PATH does not read as a satisfied tool.
+    if mise_owns "$bin" && works "$bin" "$probe"; then
+      info "found: $tool ($(command -v "$bin"))"
+    else
+      have "$bin" && warn "$(command -v "$bin") is not the mise copy"
+      warn "missing: $tool"
+      MISSING_TOOLS+=("$spec")
+    fi
+  done
 }
 
-# Distro packages lag badly (Ubuntu 24.04 ships 0.9.5), so pull the official
-# release tarball into ~/.local instead of using $PKG_MGR.
-install_neovim() {
-  local asset url dest
-  case "$(uname -s)-$(uname -m)" in
-    Linux-x86_64)  asset="nvim-linux-x86_64.tar.gz" ;;
-    Linux-aarch64) asset="nvim-linux-arm64.tar.gz" ;;
-    Darwin-arm64)  asset="nvim-macos-arm64.tar.gz" ;;
-    Darwin-x86_64) asset="nvim-macos-x86_64.tar.gz" ;;
-    *) die "no neovim build for $(uname -s)-$(uname -m); install it manually" ;;
-  esac
+mise_owns() { "$MISE_BIN" which "$1" >/dev/null 2>&1; }
 
-  url="https://github.com/neovim/neovim/releases/latest/download/$asset"
-  dest="$HOME/.local/share/neovim"
+# mise refuses to read a config file it has not been trusted with. The linked
+# path resolves into the dotfiles repo, which counts as an untrusted project
+# config, so trust it by hand rather than let every later call fail.
+trust_mise_config() {
+  "$MISE_BIN" trust --quiet "$DOTFILES/mise/config.toml"
+}
 
-  info "installing neovim from $url"
-  rm -rf "$dest"
-  mkdir -p "$dest" "$LOCAL_BIN"
-  curl -fsSL "$url" | tar -xz -C "$dest" --strip-components=1
-  ln -sf "$dest/bin/nvim" "$LOCAL_BIN/nvim"
-  info "installed: $($LOCAL_BIN/nvim --version | head -1)"
+# The official installer reads MISE_INSTALL_PATH, so mise lands beside
+# everything else this script installs instead of in its own prefix.
+install_mise() {
+  info "installing mise -> $MISE_BIN"
+  mkdir -p "$LOCAL_BIN"
+  curl -fsSL https://mise.run | MISE_INSTALL_PATH="$MISE_BIN" sh
+  works "$MISE_BIN" || die "mise did not install; see https://mise.jdx.dev"
+  info "installed: $($MISE_BIN --version)"
+}
+
+# `mise install` with no arguments installs every tool named in the linked
+# config, so the pinned versions are the single source of truth.
+install_mise_tools() {
+  local spec tool bin probe
+
+  info "installing tools from $CONFIG_HOME/mise/config.toml"
+  "$MISE_BIN" install --yes
+  "$MISE_BIN" reshim
+
+  # verify rather than trust mise's exit code
+  for spec in "${MISE_TOOLS[@]}"; do
+    IFS=: read -r tool bin probe <<<"$spec"
+    mise_owns "$bin" && works "$bin" "$probe" && continue
+    warn "still missing after install: $tool"
+    have "$bin" && warn "  $(command -v "$bin") shadows it; remove it or fix that copy"
+  done
+}
+
+# Earlier versions of this script installed neovim into ~/.local/share/neovim
+# and symlinked fd by hand. mise owns both now. A leftover symlink wins whenever
+# the shims directory is not first on PATH, so drop the ones we made.
+prune_local_bin() {
+  local link target
+  for link in "$LOCAL_BIN/nvim" "$LOCAL_BIN/fd"; do
+    [[ -L "$link" ]] || continue
+    target="$(readlink "$link")"
+    case "$target" in
+      "$HOME/.local/share/neovim/"*|*/fdfind)
+        rm -f "$link"
+        info "removed stale link: $link -> $target"
+        ;;
+    esac
+  done
+
+  if [[ -d "$HOME/.local/share/neovim" ]]; then
+    warn "old neovim install left at $HOME/.local/share/neovim — remove it when you are ready"
+  fi
 }
 
 # --------------------------------------------------------------------- zsh ---
@@ -315,7 +362,7 @@ main() {
   info "package manager: ${PKG_MGR:-none}"
 
   scan_deps
-  scan_neovim
+  scan_mise
 
   if (( CHECK_ONLY )); then
     info "check complete (no changes made)"
@@ -325,12 +372,22 @@ main() {
   if (( ${#MISSING_DEPS[@]} )); then
     install_deps
   fi
-  if (( NVIM_NEEDED )); then
-    install_neovim
+  if (( MISE_NEEDED )); then
+    install_mise
   fi
-  shim_deps
 
+  # Link before installing: `mise install` reads the config this puts in place.
   local entry
+  for entry in "${LINKS[@]}"; do
+    link "${entry%%:*}" "${entry#*:}"
+  done
+
+  if (( ${#MISSING_TOOLS[@]} )); then
+    trust_mise_config
+    install_mise_tools
+  fi
+  prune_local_bin
+
   for entry in "${ZSH_REPOS[@]}"; do
     clone_repo "${entry%:*}" "${entry##*:}"
   done
@@ -338,12 +395,11 @@ main() {
     touch_file "${entry%:*}" "${entry##*:}"
   done
 
-  for entry in "${LINKS[@]}"; do
-    link "${entry%%:*}" "${entry#*:}"
-  done
-
   if (( ! LOCAL_BIN_ON_PATH )); then
     warn "add $LOCAL_BIN to your PATH in your shell rc"
+  fi
+  if (( ! MISE_SHIMS_ON_PATH )); then
+    warn "add $MISE_SHIMS to your PATH in your shell rc (zsh/zshrc already does)"
   fi
 
   warn "fonts are not installed automatically: install a Nerd Font and select it in your terminal"

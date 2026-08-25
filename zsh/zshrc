@@ -65,8 +65,8 @@ alias gfo="git fetch origin"
 ##### misc aliases #####
 alias c=claude
 alias vim=nvim
-alias v=vim
-##### endmisc aliases #####
+v() { nvim "${1:-.}"; }
+##### end misc aliases #####
 
 # ----------------------------------------------------------------- tools ---
 
