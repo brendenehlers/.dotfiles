@@ -95,10 +95,7 @@ require('lazy').setup({
         'mason-org/mason-lspconfig.nvim',
         dependencies = { 'mason-org/mason.nvim', 'neovim/nvim-lspconfig' },
         opts = {
-          -- servers mason should install for you
           ensure_installed = { 'lua_ls' },
-          -- we call vim.lsp.enable() ourselves below, so keep the list explicit
-          automatic_enable = false,
         },
       },
 
@@ -293,9 +290,8 @@ vim.lsp.config('lua_ls', {
   settings = { Lua = {} },
 })
 
--- servers to start; add names from :h lspconfig-all (mason installs them)
 vim.lsp.enable({
-  'lua_ls',
+  'rust_analyzer',
 })
 
 -- buffer-local keymaps, set only once a server actually attaches
