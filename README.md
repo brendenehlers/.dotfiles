@@ -21,9 +21,10 @@ and mason installs the LSP servers.
 
 ## what's here
 
-| path   | links to        |
-| ------ | --------------- |
-| `nvim` | `~/.config/nvim` |
+| path             | links to         |
+| ---------------- | ---------------- |
+| `nvim`           | `~/.config/nvim` |
+| `tmux/tmux.conf` | `~/.tmux.conf`   |
 
 ## adding a new config
 
@@ -33,6 +34,7 @@ Drop the directory in the repo root and add one line to `LINKS` in `install.sh`:
 LINKS=(
   "nvim:$CONFIG_HOME/nvim"
   "tmux/tmux.conf:$HOME/.tmux.conf"
+  "git/gitconfig:$HOME/.gitconfig"
 )
 ```
 
@@ -49,6 +51,7 @@ Installed automatically via the system package manager (`apt`, `dnf`, `pacman`,
 | `ripgrep` | telescope live-grep  |
 | `fd`      | telescope find-files |
 | a C compiler | treesitter parsers |
+| `tmux`    | `tmux/tmux.conf`     |
 
 Two things are handled specially:
 

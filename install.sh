@@ -23,6 +23,7 @@ PATH="$LOCAL_BIN:$PATH"
 # source (relative to $DOTFILES) -> destination (absolute)
 LINKS=(
   "nvim:$CONFIG_HOME/nvim"
+  "tmux/tmux.conf:$HOME/.tmux.conf"
 )
 
 # generic name : binaries that satisfy it (first is the canonical name) : flags
@@ -35,6 +36,7 @@ DEPS=(
   "ripgrep:rg"
   "fd:fd fdfind:shim"
   "cc:cc gcc clang"
+  "tmux:tmux"
 )
 
 CHECK_ONLY=0
