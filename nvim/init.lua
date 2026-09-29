@@ -1,3 +1,7 @@
+-- nvim-tree owns directory buffers. Disable netrw before any plugin loads.
+vim.g.loaded_netrw = 1
+vim.g.loaded_netrwPlugin = 1
+
 -- lazy setup
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
 if not (vim.uv or vim.loop).fs_stat(lazypath) then
@@ -25,6 +29,8 @@ vim.o.syntax = 'on'
 vim.o.filetype = 'on'
 vim.o.termguicolors = true
 vim.o.signcolumn = 'yes'
+vim.o.spell = true
+vim.o.spelllang = "en_us"
 
 -- leader key
 vim.g.mapleader = ' '
@@ -97,6 +103,16 @@ require('lazy').setup({
           { '<leader>n', '<cmd>NvimTreeToggle<cr>', desc = 'File tree: toggle' },
           { '<leader>N', '<cmd>NvimTreeFindFile<cr>', desc = 'File tree: reveal current file' },
         },
+        -- Netrw is off, so nvim-tree must load early enough to claim a
+        -- directory argument. Otherwise `nvim .` opens an empty buffer.
+        init = function()
+          if vim.fn.argc(-1) == 1 then
+            local stat = (vim.uv or vim.loop).fs_stat(vim.fn.argv(0))
+            if stat and stat.type == 'directory' then
+              require('lazy').load({ plugins = { 'nvim-tree.lua' } })
+            end
+          end
+        end,
         opts = {},
       },
 
